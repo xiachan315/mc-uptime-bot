@@ -12,7 +12,11 @@ const mc = require('minecraft-protocol')
 const HOST = process.env.MC_HOST
 const PORT = parseInt(process.env.MC_PORT || '25565', 10)
 const USERNAME = process.env.MC_USER || 'bot_' + Math.random().toString(36).slice(2, 8)
-const VERSION = process.env.MC_VERSION || '1.21.4'
+const VERSION = process.env.MC_VERSION || '1.8.8'
+// Protocol ids for the few generations spoken here. The server side serves the
+// oldest of them, so the default matches that one.
+const PROTOCOLS = { '1.8.8': 47, '1.8.9': 47, '1.20.1': 763, '1.21.4': 769 }
+const PROTO = PROTOCOLS[VERSION] || 47
 const MODE = process.env.MODE || 'status'
 const STAY_MS = parseInt(process.env.STAY_MIN || '30', 10) * 60 * 1000
 
@@ -46,7 +50,7 @@ function statusPing () {
     sock.on('connect', () => {
       log('tcp connected to', HOST + ':' + PORT)
       const hs = mcPacket(0x00, Buffer.concat([
-        varint(769),
+        varint(PROTO),
         mcString(HOST),
         Buffer.from([(PORT >> 8) & 0xff, PORT & 0xff]),
         varint(1)
@@ -92,7 +96,7 @@ function rawLogin (seconds) {
 
     sock.on('connect', () => {
       const hs = mcPacket(0x00, Buffer.concat([
-        varint(769),
+        varint(PROTO),
         mcString(HOST),
         Buffer.from([(PORT >> 8) & 0xff, PORT & 0xff]),
         varint(2)
@@ -139,11 +143,12 @@ async function stay () {
     setTimeout(() => process.exit(code), 500)
   }
 
-  client.on('login', () => {
-    log('logged in as', USERNAME)
-    setTimeout(() => finish(0, 'stay complete'), STAY_MS)
-    setTimeout(() => finish(1, 'hard timeout'), STAY_MS + 4 * 60 * 1000)
-  })
+  client.on('login', () => log('logged in as', USERNAME))
+
+  // Timers are armed on connect, not on login: a session that never fires the
+  // login event still has to end on schedule instead of hanging the runner.
+  setTimeout(() => finish(0, 'stay complete'), STAY_MS)
+  setTimeout(() => finish(1, 'hard timeout'), STAY_MS + 4 * 60 * 1000)
   client.on('position', (p) => {
     try { client.write('teleport_confirm', { teleportId: p.teleportId }) } catch {}
     log('spawned; staying', STAY_MS / 60000, 'min')
