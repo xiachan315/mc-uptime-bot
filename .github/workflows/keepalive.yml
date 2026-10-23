@@ -1,0 +1,62 @@
+name: keepalive
+
+# A real client session keeps the server from going idle.
+# Rounds overlap on purpose: every run stays ~60 min while a new one starts
+# every 30 min, so at any moment at least one session is live even if a run
+# is queued or delayed by the scheduler.
+on:
+  schedule:
+    - cron: "13,43 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "status | login | stay"
+        required: false
+        default: "stay"
+      stay_min:
+        description: "how long a stay-mode session lasts, in minutes"
+        required: false
+        default: "60"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps
+        run: npm install --no-audit --fund=0
+
+      - name: Session
+        env:
+          MODE: ${{ github.event.inputs.mode || 'stay' }}
+          STAY_MIN: ${{ github.event.inputs.stay_min || '60' }}
+          LOGIN_WAIT: "20"
+          MC_HOST: ${{ secrets.MC_HOST }}
+          MC_PORT: ${{ secrets.MC_PORT }}
+          MC_USER: ${{ secrets.MC_USER }}
+          MC_VERSION: ${{ vars.MC_VERSION }}
+        run: node bot.js
+
+      - name: Heartbeat
+        if: always()
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          date -u +%FT%TZ > .heartbeat
+          git add .heartbeat
+          git commit -m "heartbeat" || echo "nothing to commit"
+          git pull --rebase --autostash || true
+          git push || true

@@ -1,0 +1,9 @@
+{
+  "name": "mc-uptime-bot",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Keeps an idling Minecraft java server awake with a real client session",
+  "main": "bot.js",
+  "scripts": { "start": "node bot.js" },
+  "dependencies": { "minecraft-protocol": "^1.68.0" }
+}
