@@ -1,0 +1,44 @@
+name: power
+
+# The host puts an idle free server to sleep after roughly 15 quiet minutes.
+# This pokes the panel power endpoint on a 5 minute cycle, which resets that
+# counter. It is a no-op while the server is already running.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: power
+  cancel-in-progress: false
+
+jobs:
+  poke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Poke power endpoint
+        env:
+          MCSH_TOKEN: ${{ secrets.MCSH_TOKEN }}
+          MCSH_ID: ${{ vars.MCSH_ID }}
+        run: |
+          set -u
+          url="https://api.mcserverhost.com/user/servers/${MCSH_ID}/power"
+          for i in 1 2 3; do
+            code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 25 -X POST \
+              -H 'content-type: application/json' \
+              -H "authorization: Bearer ${MCSH_TOKEN}" \
+              -d '{"action":"start","wait_seconds":0}' "$url")
+            echo "attempt ${i} -> HTTP ${code}"
+            if [ "$code" = "200" ]; then break; fi
+            sleep 10
+          done
+          echo "body: $(head -c 200 /tmp/body)"
+          # 503 means the node is at capacity; nothing to do but wait for a slot.
+          if [ "$code" != "200" ] && [ "$code" != "503" ]; then
+            echo "unexpected code ${code}"
+            exit 1
+          fi
