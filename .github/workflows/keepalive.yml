@@ -4,6 +4,10 @@ name: keepalive
 # Rounds overlap on purpose: every run stays ~60 min while a new one starts
 # every 30 min, so at any moment at least one session is live even if a run
 # is queued or delayed by the scheduler.
+#
+# 2026-10-26: the panel now PAUSES free servers, and a paused server answers
+# /power with 400. Each run therefore resumes + starts the server before it
+# tries to open the game session.
 on:
   schedule:
     - cron: "13,43 * * * *"
@@ -37,7 +41,23 @@ jobs:
           node-version: "20"
 
       - name: Install deps
-        run: npm install --no-audit --fund=0
+        run: npm install --no-audit --no-fund
+
+      - name: Wake server before session
+        continue-on-error: true
+        env:
+          MCSH_TOKEN: ${{ secrets.MCSH_TOKEN }}
+          MCSH_ID: ${{ vars.MCSH_ID }}
+        run: |
+          base="https://api.mcserverhost.com"
+          auth="authorization: Bearer ${MCSH_TOKEN}"
+          curl -s -o /dev/null --max-time 25 -X POST -H "${auth}" \
+            "${base}/servers/resume/${MCSH_ID}" || true
+          curl -s -o /dev/null --max-time 25 -X POST \
+            -H 'content-type: application/json' -H "${auth}" \
+            -d '{"action":"start","wait_seconds":0}' \
+            "${base}/user/servers/${MCSH_ID}/power" || true
+          sleep 40
 
       - name: Session
         env:
