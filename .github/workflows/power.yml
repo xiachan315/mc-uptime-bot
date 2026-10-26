@@ -3,6 +3,10 @@ name: power
 # The host puts an idle free server to sleep after roughly 15 quiet minutes.
 # This pokes the panel power endpoint on a 5 minute cycle, which resets that
 # counter. It is a no-op while the server is already running.
+#
+# 2026-10-26: the panel now PAUSES free servers. While paused, /power answers
+# 400 "Request body could not be parsed" (misleading), so every run resumes
+# first and only then pokes /power.
 on:
   schedule:
     - cron: "*/5 * * * *"
@@ -20,23 +24,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: Poke power endpoint
+      - name: Resume then poke power
         env:
           MCSH_TOKEN: ${{ secrets.MCSH_TOKEN }}
           MCSH_ID: ${{ vars.MCSH_ID }}
         run: |
           set -u
-          url="https://api.mcserverhost.com/user/servers/${MCSH_ID}/power"
+          base="https://api.mcserverhost.com"
+          auth="authorization: Bearer ${MCSH_TOKEN}"
+
+          rcode=$(curl -s -o /tmp/rbody -w '%{http_code}' --max-time 25 -X POST \
+            -H "${auth}" "${base}/servers/resume/${MCSH_ID}" || echo 000)
+          echo "resume -> HTTP ${rcode} | $(head -c 160 /tmp/rbody 2>/dev/null)"
+
+          url="${base}/user/servers/${MCSH_ID}/power"
+          code="000"
           for i in 1 2 3; do
             code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 25 -X POST \
               -H 'content-type: application/json' \
-              -H "authorization: Bearer ${MCSH_TOKEN}" \
-              -d '{"action":"start","wait_seconds":0}' "$url")
+              -H "${auth}" \
+              -d '{"action":"start","wait_seconds":0}' "$url" || echo 000)
             echo "attempt ${i} -> HTTP ${code}"
             if [ "$code" = "200" ]; then break; fi
             sleep 10
           done
-          echo "body: $(head -c 200 /tmp/body)"
+          echo "body: $(head -c 200 /tmp/body 2>/dev/null)"
           # 503 means the node is at capacity; nothing to do but wait for a slot.
           if [ "$code" != "200" ] && [ "$code" != "503" ]; then
             echo "unexpected code ${code}"
